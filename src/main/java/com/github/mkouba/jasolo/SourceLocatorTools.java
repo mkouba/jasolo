@@ -33,6 +33,13 @@ public class SourceLocatorTools {
      */
     static final int MAX_MATCHES = 500;
 
+    /**
+     * Safety limit for the total number of matches collected by
+     * {@code grepArtifact} across all files of an artifact; per-file counts
+     * are always complete, only the collected match lines are capped.
+     */
+    static final int MAX_TOTAL_MATCHES = 500;
+
     @Inject
     SourceLocator locator;
 
@@ -82,12 +89,7 @@ public class SourceLocatorTools {
             @ToolArg(description = "Regular expression (java.util.regex syntax)") String pattern,
             @ToolArg(description = "Case-insensitive matching", required = false) Boolean ignoreCase) {
         SourceFile file = readSource(fqcn, gav);
-        Pattern compiled;
-        try {
-            compiled = Pattern.compile(pattern, Boolean.TRUE.equals(ignoreCase) ? Pattern.CASE_INSENSITIVE : 0);
-        } catch (PatternSyntaxException e) {
-            throw new ToolCallException("Invalid pattern '" + pattern + "': " + e.getMessage());
-        }
+        Pattern compiled = compilePattern(pattern, ignoreCase);
         List<GrepResult.Match> matches = new ArrayList<>();
         int count = 0;
         String[] lines = lines(file.content());
@@ -101,6 +103,52 @@ public class SourceLocatorTools {
         }
         return new GrepResult(file.filename(), file.gav().version(), file.sources().origin(), pattern, count,
                 count > matches.size(), matches, file.sources().warnings());
+    }
+
+    @Tool(name = "grepArtifact", description = "Search all main Java source files of the given Maven artifact with a "
+            + "regular expression and get the matching lines grouped by class; the sources are resolved like in "
+            + "getSource. Files without matches are omitted from the result.",
+            structuredContent = true)
+    ArtifactGrepResult grepArtifact(
+            @ToolArg(description = "Maven coordinates: groupId:artifactId:version") String gav,
+            @ToolArg(description = "Regular expression (java.util.regex syntax)") String pattern,
+            @ToolArg(description = "Case-insensitive matching", required = false) Boolean ignoreCase) {
+        Gav parsed = parseGav(gav);
+        LocatedSources sources = locate(parsed);
+        Pattern compiled = compilePattern(pattern, ignoreCase);
+        List<ArtifactGrepResult.FileResult> files = new ArrayList<>();
+        int filesSearched = 0;
+        int filesWithMatches = 0;
+        int count = 0;
+        int listed = 0;
+        for (String fqcn : sources.listFqcns()) {
+            String content = sources.read(fqcn).orElse(null);
+            if (content == null) {
+                continue;
+            }
+            filesSearched++;
+            List<GrepResult.Match> matches = new ArrayList<>();
+            String[] lines = lines(content);
+            int fileCount = 0;
+            for (int i = 0; i < lines.length; i++) {
+                if (compiled.matcher(lines[i]).find()) {
+                    count++;
+                    fileCount++;
+                    if (listed < MAX_TOTAL_MATCHES) {
+                        listed++;
+                        matches.add(new GrepResult.Match(i + 1, lines[i]));
+                    }
+                }
+            }
+            // a file with matches but an exhausted budget is still listed -
+            // its count is complete, only the match lines are missing
+            if (fileCount > 0) {
+                filesWithMatches++;
+                files.add(new ArtifactGrepResult.FileResult(fqcn, fileCount, fileCount > matches.size(), matches));
+            }
+        }
+        return new ArtifactGrepResult(parsed.toString(), sources.origin(), pattern, filesSearched, filesWithMatches,
+                count, count > listed, files, sources.warnings());
     }
 
     @Tool(name = "listClasses", description = "List the fully qualified names of the main Java source files "
@@ -147,6 +195,18 @@ public class SourceLocatorTools {
             total--;
         }
         return total == all.length ? all : Arrays.copyOf(all, total);
+    }
+
+    /**
+     * Compiles a grep pattern; an invalid pattern is reported as a tool call
+     * error.
+     */
+    private static Pattern compilePattern(String pattern, Boolean ignoreCase) {
+        try {
+            return Pattern.compile(pattern, Boolean.TRUE.equals(ignoreCase) ? Pattern.CASE_INSENSITIVE : 0);
+        } catch (PatternSyntaxException e) {
+            throw new ToolCallException("Invalid pattern '" + pattern + "': " + e.getMessage());
+        }
     }
 
     private static Gav parseGav(String gav) {

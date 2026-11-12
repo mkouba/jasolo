@@ -25,9 +25,10 @@ class SourceLocatorToolsTest {
         McpStreamableTestClient client = McpAssured.newConnectedStreamableClient();
         client.when()
                 .toolsList(page -> {
-                    assertEquals(3, page.size());
+                    assertEquals(4, page.size());
                     assertNotNull(page.findByName("getSource"));
                     assertNotNull(page.findByName("grepSource"));
+                    assertNotNull(page.findByName("grepArtifact"));
                     assertNotNull(page.findByName("listClasses"));
                 })
                 // resolved from the git tag 2.0.0
@@ -249,6 +250,88 @@ class SourceLocatorToolsTest {
                             assertEquals(1, json.getInteger("count"));
                             assertTrue(json.getString("origin").contains("maven sources jar"));
                         })
+                .thenAssertResults();
+    }
+
+    @Test
+    void testGrepArtifact() {
+        McpStreamableTestClient client = McpAssured.newConnectedStreamableClient();
+        client.when()
+                // git-resolved: only main sources are searched, files without matches are omitted
+                .toolsCall("grepArtifact", Map.of("gav", Fixtures.GIT_TAG_GAV, "pattern", "marker"), r -> {
+                    assertFalse(r.isError());
+                    JsonObject json = (JsonObject) r.structuredContent();
+                    assertEquals("org.example:lib-core:2.0.0", json.getString("gav"));
+                    assertEquals("marker", json.getString("pattern"));
+                    assertEquals(2, json.getInteger("filesSearched"));
+                    assertEquals(1, json.getInteger("filesWithMatches"));
+                    assertEquals(1, json.getInteger("count"));
+                    assertFalse(json.getBoolean("truncated"));
+                    JsonArray files = json.getJsonArray("files");
+                    assertEquals(1, files.size());
+                    JsonObject core = files.getJsonObject(0);
+                    assertEquals("org.example.libcore.Core", core.getString("fqcn"));
+                    assertEquals(1, core.getInteger("count"));
+                    assertFalse(core.getBoolean("truncated"));
+                    assertEquals(4, core.getJsonArray("matches").getJsonObject(0).getInteger("line"));
+                    assertTrue(core.getJsonArray("matches").getJsonObject(0).getString("text")
+                            .contains("marker: tag-2.0.0"));
+                })
+                // case-insensitive matching
+                .toolsCall("grepArtifact", Map.of("gav", Fixtures.GIT_TAG_GAV, "pattern", "MARKER",
+                        "ignoreCase", true), r -> {
+                            assertFalse(r.isError());
+                            assertEquals(1, ((JsonObject) r.structuredContent()).getInteger("filesWithMatches"));
+                        })
+                // no matches at all
+                .toolsCall("grepArtifact", Map.of("gav", Fixtures.GIT_TAG_GAV, "pattern", "no-such-thing"), r -> {
+                    assertFalse(r.isError());
+                    JsonObject json = (JsonObject) r.structuredContent();
+                    assertEquals(2, json.getInteger("filesSearched"));
+                    assertEquals(0, json.getInteger("filesWithMatches"));
+                    assertEquals(0, json.getInteger("count"));
+                    assertEquals(0, json.getJsonArray("files").size());
+                })
+                // the total match list is capped, per-file counts stay complete
+                .toolsCall("grepArtifact", Map.of("gav", Fixtures.GIT_TAG_GAV, "pattern", "filler"), r -> {
+                    assertFalse(r.isError());
+                    JsonObject json = (JsonObject) r.structuredContent();
+                    assertEquals(600, json.getInteger("count"));
+                    assertTrue(json.getBoolean("truncated"));
+                    JsonArray files = json.getJsonArray("files");
+                    assertEquals(1, files.size());
+                    JsonObject big = files.getJsonObject(0);
+                    assertEquals("org.example.libcore.Big", big.getString("fqcn"));
+                    assertEquals(600, big.getInteger("count"));
+                    assertTrue(big.getBoolean("truncated"));
+                    assertEquals(SourceLocatorTools.MAX_TOTAL_MATCHES, big.getJsonArray("matches").size());
+                })
+                // m2-resolved: src/main/java rooting stripped, files in class name order
+                .toolsCall("grepArtifact", Map.of("gav", Fixtures.M2_ONLY_GAV, "pattern", "class"), r -> {
+                    assertFalse(r.isError());
+                    JsonObject json = (JsonObject) r.structuredContent();
+                    assertTrue(json.getString("origin").contains("maven sources jar"), json.getString("origin"));
+                    assertEquals(2, json.getInteger("filesSearched"));
+                    assertEquals(2, json.getInteger("filesWithMatches"));
+                    JsonArray files = json.getJsonArray("files");
+                    assertEquals("org.example.legacy.Legacy", files.getJsonObject(0).getString("fqcn"));
+                    assertEquals("org.example.libextra.Extra", files.getJsonObject(1).getString("fqcn"));
+                })
+                // approximate git match carries a warning
+                .toolsCall("grepArtifact", Map.of("gav", Fixtures.GIT_BRANCH_GAV, "pattern", "marker"), r -> {
+                    assertFalse(r.isError());
+                    assertBranchWarning(r.structuredContent());
+                })
+                // invalid pattern
+                .toolsCall("grepArtifact", Map.of("gav", Fixtures.GIT_TAG_GAV, "pattern", "["), r -> {
+                    assertTrue(r.isError());
+                    assertTrue(r.firstContent().asText().text().contains("Invalid pattern"));
+                })
+                // no resolver can locate the GAV
+                .toolsCall("grepArtifact", Map.of("gav", Fixtures.MISSING_GAV, "pattern", "x"), r -> {
+                    assertTrue(r.isError());
+                    assertTrue(r.firstContent().asText().text().contains("No source resolver"));
+                })
                 .thenAssertResults();
     }
 

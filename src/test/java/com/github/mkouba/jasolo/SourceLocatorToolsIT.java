@@ -46,9 +46,10 @@ class SourceLocatorToolsIT {
                 .connect()) {
             client.when()
                     .toolsList(page -> {
-                        assertEquals(3, page.size());
+                        assertEquals(4, page.size());
                         assertNotNull(page.findByName("getSource"));
                         assertNotNull(page.findByName("grepSource"));
+                        assertNotNull(page.findByName("grepArtifact"));
                         assertNotNull(page.findByName("listClasses"));
                     })
                     // resolved from the git tag 2.0.0
@@ -68,6 +69,17 @@ class SourceLocatorToolsIT {
                                 assertTrue(json.getString("origin").contains("maven sources jar"), json.encode());
                                 assertEquals(1, json.getInteger("count"));
                             })
+                    // artifact-wide grep over the git-resolved sources
+                    .toolsCall("grepArtifact", Map.of("gav", Fixtures.GIT_TAG_GAV, "pattern", "marker"), r -> {
+                        assertFalse(r.isError());
+                        JsonObject json = (JsonObject) r.structuredContent();
+                        assertTrue(json.getString("origin").endsWith("ref 2.0.0"), json.encode());
+                        assertEquals(2, json.getInteger("filesSearched"));
+                        assertEquals(1, json.getInteger("filesWithMatches"));
+                        JsonArray files = json.getJsonArray("files");
+                        assertEquals(1, files.size());
+                        assertEquals("org.example.libcore.Core", files.getJsonObject(0).getString("fqcn"));
+                    })
                     // approximate match - read from the git branch 2.0, with a warning
                     .toolsCall("listClasses", Map.of("gav", Fixtures.GIT_BRANCH_GAV), r -> {
                         assertFalse(r.isError());
