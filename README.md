@@ -12,6 +12,49 @@ jasolo is for **sources of dependency artifacts**. It is not intended for
 reading files of the project you are currently working on - use your
 client's regular file tools for those.
 
+## Installation
+
+### Via JBang (recommended)
+
+With [JBang](https://www.jbang.dev/download/) installed, register jasolo
+with your MCP client:
+
+```bash
+claude mcp add -s user jasolo \
+  -e JASOLO_GIT_ROOTS=$HOME/source \
+  -- jbang jasolo@mkouba/jasolo
+```
+
+JBang resolves the released uber-jar from
+[GitHub Releases](https://github.com/mkouba/jasolo/releases) via the
+[`jbang-catalog.json`](jbang-catalog.json) in this repository and provisions
+a JDK 21+ if needed - no build step. To pick up a newly released version,
+force a cache refresh once:
+
+```bash
+jbang --fresh jasolo@mkouba/jasolo
+```
+
+### Via native binary
+
+Pre-built native executables are attached to each
+[GitHub Release](https://github.com/mkouba/jasolo/releases/latest). They
+start in milliseconds and need no JVM or JBang installation:
+
+```bash
+curl -sLO https://github.com/mkouba/jasolo/releases/download/0.1.0/jasolo-0.1.0-linux-x86_64
+chmod +x jasolo-0.1.0-linux-x86_64
+claude mcp add -s user jasolo \
+  -e JASOLO_GIT_ROOTS=$HOME/source \
+  -- /path/to/jasolo-0.1.0-linux-x86_64
+```
+
+### Direct download or from source
+
+Download the uber-jar from the
+[latest GitHub Release](https://github.com/mkouba/jasolo/releases/latest),
+or build it yourself - see [Building and running](#building-and-running).
+
 ## Why an MCP server?
 
 An agent could shell out to `unzip`/`grep` instead - but for an agent, the
@@ -147,10 +190,10 @@ MCP clients usually collect it).
 mvn package -Dprod
 claude mcp add -s user jasolo \
   -e JASOLO_GIT_ROOTS=$HOME/source \
-  -- java -jar /path/to/jasolo/target/jasolo-1.0.0-SNAPSHOT-runner.jar
+  -- java -jar /path/to/jasolo/target/jasolo-<version>-runner.jar
 ```
 
-Requires Java 25+. Use an absolute path to `java` if the MCP client is not
+Requires Java 21+. Use an absolute path to `java` if the MCP client is not
 launched from a shell (e.g. a desktop app) and `java` is only on the shell
 `PATH`.
 
@@ -167,7 +210,7 @@ mvn package -Dprod -Dnative -Dquarkus.native.container-build=true
 
 claude mcp add -s user jasolo \
   -e JASOLO_GIT_ROOTS=$HOME/source \
-  -- /path/to/jasolo/target/jasolo-1.0.0-SNAPSHOT-runner
+  -- /path/to/jasolo/target/jasolo-<version>-runner
 ```
 
 The `show` git access strategy runs the `git` CLI, which must be on the
@@ -204,3 +247,23 @@ mvn verify -Dprod -Dnative   # + stdio integration tests against the native exec
 
 The production builds additionally run `SourceLocatorToolsIT`, which launches
 the packaged artifact and talks to it over stdio.
+
+## Releasing
+
+jasolo is not published to Maven Central - the released artifacts are
+attached to a GitHub Release: the stdio uber-jar (exposed to JBang through
+the repo-root `jbang-catalog.json`) and native executables.
+
+1. Set the release version: `mvn versions:set -DnewVersion=0.1.0`
+2. Point the `script-ref` in `jbang-catalog.json` at the release asset URL
+   of that version
+3. Build and test the release artifacts:
+   `mvn clean verify -Dprod` (uber-jar) and
+   `mvn verify -Dprod -Dnative` (native executable; use
+   `-Dquarkus.native.container-build=true` to build for a foreign platform)
+4. Commit, tag (`0.1.0`) and push, including the tag
+5. Create a GitHub Release for the tag and attach:
+   - `target/jasolo-0.1.0-runner.jar` (the uber-jar)
+   - `target/jasolo-0.1.0-runner` renamed to
+     `jasolo-0.1.0-<os>-<arch>` (e.g. `jasolo-0.1.0-linux-x86_64`) - one
+     file per platform you built for

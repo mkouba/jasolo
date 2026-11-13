@@ -1,0 +1,9 @@
+{
+  "aliases": {
+    "jasolo": {
+      "script-ref": "https://github.com/mkouba/jasolo/releases/download/0.1.0/jasolo-0.1.0-runner.jar",
+      "description": "MCP server that locates and reads Java source code of dependency artifacts",
+      "java-version": "21+"
+    }
+  }
+}
