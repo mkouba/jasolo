@@ -21,19 +21,24 @@ final class TestConfigs {
     }
 
     static JasoloConfig of(Path gitRoot, Path m2Repo, List<String> cacheExclusions) {
-        return of(gitRoot, m2Repo, "show", 16, 256, cacheExclusions);
+        return of(gitRoot, m2Repo, "show", 16, 256, cacheExclusions, List.of());
     }
 
     static JasoloConfig of(Path gitRoot, Path m2Repo, String accessMode) {
-        return of(gitRoot, m2Repo, accessMode, 16, 256, List.of());
+        return of(gitRoot, m2Repo, accessMode, 16, 256, List.of(), List.of());
     }
 
     static JasoloConfig of(Path gitRoot, Path m2Repo, String accessMode, int maxJars, int maxFiles) {
-        return of(gitRoot, m2Repo, accessMode, maxJars, maxFiles, List.of());
+        return of(gitRoot, m2Repo, accessMode, maxJars, maxFiles, List.of(), List.of());
     }
 
     static JasoloConfig of(Path gitRoot, Path m2Repo, String accessMode, int maxJars, int maxFiles,
             List<String> cacheExclusions) {
+        return of(gitRoot, m2Repo, accessMode, maxJars, maxFiles, cacheExclusions, List.of());
+    }
+
+    static JasoloConfig of(Path gitRoot, Path m2Repo, String accessMode, int maxJars, int maxFiles,
+            List<String> cacheExclusions, List<String> gitExclusions) {
         List<String> roots = gitRoot == null ? List.of() : List.of(gitRoot.toString());
         String localRepo = m2Repo == null ? "/nonexistent-m2" : m2Repo.toString();
         return new JasoloConfig() {
@@ -45,6 +50,11 @@ final class TestConfigs {
                     @Override
                     public Optional<List<String>> roots() {
                         return Optional.of(roots);
+                    }
+
+                    @Override
+                    public Optional<List<String>> exclude() {
+                        return Optional.of(gitExclusions);
                     }
 
                     @Override

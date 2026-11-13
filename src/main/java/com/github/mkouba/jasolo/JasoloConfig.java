@@ -22,11 +22,20 @@ public interface JasoloConfig {
     interface Git {
 
         /**
-         * @return directories whose immediate children are cloned git repos,
-         *         e.g. {@code /home/me/source} or {@code /home/me/source/quarkiverse};
-         *         empty disables the git resolver (m2-only mode)
+         * @return directories scanned recursively for cloned git repos,
+         *         e.g. {@code /home/me/source}; a discovered repo is not
+         *         descended into and a root may itself be a repo; empty
+         *         disables the git resolver (m2-only mode)
          */
         Optional<List<String>> roots();
+
+        /**
+         * @return paths relative to a git root whose subtrees are skipped
+         *         during the recursive repo scan and never indexed as
+         *         repositories, e.g. {@code advisories} or
+         *         {@code experiments/some-checkout}
+         */
+        Optional<List<String>> exclude();
 
         /**
          * @return the id of the {@link GitAccessStrategy} used to read files from a git ref

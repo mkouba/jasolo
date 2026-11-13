@@ -25,6 +25,14 @@ import java.util.zip.ZipEntry;
  * ({@code Core} marker: {@code tag-2.0.0}), {@code main} has a second commit
  * ({@code Core} marker: {@code main-branch})</li>
  * </ul>
+ * Additional repositories under {@code roots}:
+ * <ul>
+ * <li>{@code roots/group/other-lib} ({@code org.example:other-lib}) - nested
+ * two levels below the root, found by the recursive scan</li>
+ * <li>{@code roots/lib-parent/integration/nested-repo}
+ * ({@code org.example:nested-repo}) - inside an indexed repo, never
+ * indexed</li>
+ * </ul>
  */
 final class Fixtures {
 
@@ -112,6 +120,35 @@ final class Fixtures {
         write(repo.resolve("lib-core/src/main/java/org/example/libcore/Core.java"), coreSource("main-branch"));
         git(repo, "add", "-A");
         git(repo, "commit", "-q", "-m", "main branch work");
+
+        // a repo nested more than one level below the root - found by the
+        // recursive scan
+        createStandaloneRepo(base.resolve("roots/group/other-lib"), "org.example", "other-lib", "1.0.0-SNAPSHOT");
+
+        // a repo inside an indexed repo - must NOT be indexed (created after
+        // the commits of the enclosing repo, so it is not committed there)
+        createStandaloneRepo(repo.resolve("integration/nested-repo"), "org.example", "nested-repo", "1.0.0-SNAPSHOT");
+    }
+
+    /**
+     * A single-module git repository producing {@code groupId:artifactId}.
+     */
+    static void createStandaloneRepo(Path repo, String groupId, String artifactId, String version) throws IOException {
+        write(repo.resolve("pom.xml"), """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <project xmlns="http://maven.apache.org/POM/4.0.0">
+                    <modelVersion>4.0.0</modelVersion>
+                    <groupId>%s</groupId>
+                    <artifactId>%s</artifactId>
+                    <version>%s</version>
+                </project>
+                """.formatted(groupId, artifactId, version));
+        git(repo, "init", "-q", "-b", "main");
+        git(repo, "config", "user.email", "test@example.com");
+        git(repo, "config", "user.name", "jasolo test");
+        git(repo, "config", "commit.gpgsign", "false");
+        git(repo, "add", "-A");
+        git(repo, "commit", "-q", "-m", "initial");
     }
 
     static void createM2(Path base) throws IOException {

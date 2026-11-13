@@ -1,12 +1,18 @@
 package com.github.mkouba.jasolo;
 
 import java.io.IOException;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.jboss.logging.Logger;
@@ -31,11 +37,18 @@ final class GitRepoIndex {
     }
 
     private final List<String> gitRoots;
+    private final Set<String> excludedPaths;
 
     private volatile Map<String, ModuleLocation> index;
 
     GitRepoIndex(JasoloConfig config) {
         this.gitRoots = config.git().roots().orElseGet(List::of);
+        this.excludedPaths = config.git().exclude().orElseGet(List::of)
+                .stream()
+                .map(String::trim)
+                .map(path -> path.replaceAll("^/+", "").replaceAll("/+$", ""))
+                .filter(path -> !path.isEmpty())
+                .collect(Collectors.toUnmodifiableSet());
     }
 
     /**
@@ -79,14 +92,51 @@ final class GitRepoIndex {
     }
 
     private void scanRoot(Path rootDir, Map<String, ModuleLocation> result) {
-        try (Stream<Path> children = Files.list(rootDir)) {
-            children.filter(Files::isDirectory)
-                    .filter(dir -> Files.isDirectory(dir.resolve(".git")))
-                    .sorted(Comparator.comparing(Path::getFileName))
-                    .forEach(repoDir -> scanRepo(repoDir, result));
+        // Repos are discovered recursively; a discovered repo is not descended
+        // into - its nested repositories (submodules, quickstarts, worktrees)
+        // belong to the repo, not to the configured roots. The root itself may
+        // be a repo.
+        List<Path> repoDirs = new ArrayList<>();
+        try {
+            Files.walkFileTree(rootDir, new SimpleFileVisitor<>() {
+
+                @Override
+                public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+                    // the root itself is always scanned, excluded paths are not;
+                    // the walk is top-down, so an exact match of the
+                    // root-relative path is sufficient
+                    if (!dir.equals(rootDir)) {
+                        String relative = rootDir.relativize(dir).toString().replace('\\', '/');
+                        if (excludedPaths.contains(relative)) {
+                            return FileVisitResult.SKIP_SUBTREE;
+                        }
+                    }
+                    // .git is a directory for a normal clone and a file for
+                    // worktrees/submodules - both are git repositories
+                    if (Files.exists(dir.resolve(".git"))) {
+                        repoDirs.add(dir);
+                        return FileVisitResult.SKIP_SUBTREE;
+                    }
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult visitFileFailed(Path file, IOException e) {
+                    LOG.warnf(e, "Unable to scan %s", file);
+                    return FileVisitResult.CONTINUE;
+                }
+            });
         } catch (IOException e) {
             LOG.warnf(e, "Unable to scan git root %s", rootDir);
         }
+        // Deterministic order - when an artifact is produced by multiple
+        // repos, the repo closest to the root wins: primary clones tend to
+        // sit directly under a root, secondary copies (advisory checkouts,
+        // experiments) are nested deeper; ties are broken lexicographically
+        repoDirs.sort(Comparator
+                .comparingInt((Path dir) -> rootDir.relativize(dir).getNameCount())
+                .thenComparing(Comparator.naturalOrder()));
+        repoDirs.forEach(repoDir -> scanRepo(repoDir, result));
     }
 
     private void scanRepo(Path repoDir, Map<String, ModuleLocation> result) {

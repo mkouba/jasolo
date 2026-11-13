@@ -100,6 +100,10 @@ implement `SourceResolver` and register a bean; the **higher** the
    the configured `jasolo.git.roots`:
    - the repo's `pom.xml` modules are indexed at first use
      (`groupId:artifactId` → repo + module directory)
+   - when multiple indexed repos produce the same `groupId:artifactId`, the
+     repo closest to a root wins (primary clones tend to sit directly under a
+     root; secondary copies like advisory checkouts are nested deeper) and a
+     warning is logged
    - the GAV version is mapped to a git ref (see below) and the file is read
      **non-destructively** with `git show <ref>:<path>` - your working copy is
      never touched
@@ -158,7 +162,8 @@ and branches are picked up without restarting the server.
 
 | Property | Default | Description |
 |----------|---------|-------------|
-| `jasolo.git.roots` | *(empty)* | Comma-separated list of directories whose immediate children are cloned git repos, e.g. `/home/me/source,/home/me/source/quarkiverse`. Empty disables the git resolver. |
+| `jasolo.git.roots` | *(empty)* | Comma-separated list of directories scanned **recursively** for cloned git repos, e.g. `/home/me/source`. A discovered repo is not descended into (nested repos of a repo - submodules, quickstarts, worktrees - are not indexed) and a root may itself be a repo. Empty disables the git resolver. |
+| `jasolo.git.exclude` | *(empty)* | Comma-separated list of paths relative to a git root whose subtrees are skipped during the recursive repo scan and never indexed as repositories, e.g. `advisories` (the whole folder) or `experiments/some-checkout` (one nested clone) - for secondary clones (forks, advisory checkouts) that would otherwise shadow primary clones. |
 | `jasolo.git.access-mode` | `show` | Git access strategy. `show` reads files from a ref without touching the working copy. The `GitAccessStrategy` SPI allows other modes (e.g. real checkouts). |
 | `jasolo.git.ref-patterns` | `{version},v{version},{major}.{minor},{major}.{minor}.x,development/{major}.{minor}` | Ordered ref patterns; placeholders `{version}`, `{major}`, `{minor}`. |
 | `jasolo.maven.local-repo` | `~/.m2/repository` | Local Maven repository path. |
