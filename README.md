@@ -57,20 +57,39 @@ or build it yourself - see [Building and running](#building-and-running).
 
 ## Why an MCP server?
 
-An agent could shell out to `unzip`/`grep` instead - but for an agent, the
-MCP tools are cheaper in roundtrips and context window:
+An agent could shell out to `unzip`/`grep` instead - and a disciplined agent
+with good pipelines matches jasolo on the easy cases (a package-rooted
+sources jar in the local Maven repository). jasolo pulls ahead where the
+built-in way is impossible, slow or fragile:
 
-- **Fewer roundtrips** - locating and reading a class from a dependency is a
-  single `getSource` call instead of `ls` + `unzip -l` + `unzip -p`, with no
-  failed guesses on entry paths (package-rooted vs. `src/main/java` jars,
-  module directories, nested classes and test sources are all resolved
-  server-side)
-- **Bounded context consumption** - `startLine`/`endLine` slice large files
-  deliberately and `totalLines` reveals truncation, so reading 60 lines of a
-  1000-line file is a choice, not an accident
-- **Structured results** - typed JSON instead of command output to parse:
-  `listClasses` returns FQCNs (not jar entry paths), `grepSource` returns
-  capped `{line, text}` matches
+- **Sources not in the local Maven repository** - SNAPSHOT and development
+  versions, versions never built locally: `unzip` has nothing to work with,
+  jasolo resolves them from a local git clone of the producing project
+- **Version → git ref → module directory mapping** -
+  `io.quarkus:quarkus-core:3.27.5.1` becomes
+  `git show 3.27.5.1:core/runtime/...` in a single call; the built-in way
+  needs several exploratory roundtrips (tag and branch listings, grepping
+  poms of a 1000-module repository) and must know the tag and
+  maintenance-branch conventions. jasolo also warns when a match is only
+  approximate (e.g. the tag is missing and a branch was read instead)
+- **Non-standard jar layouts** - `src/main/java`-rooted sources jars,
+  nested classes (`Foo$Bar`), test sources: resolved server-side instead of
+  a pipeline that fails and gets retried
+- **Bounded, metadata-aware reads** - `totalLines`/`truncated` tell the
+  agent that a file was cut, so reading 60 lines of a 1000-line file is a
+  choice, not an accident; `grepSource`/`grepArtifact` cap matches at 500
+  instead of dumping an unbounded `grep` into the context window
+- **Artifact-wide search in one roundtrip** - `grepArtifact` replaces the
+  list-then-grep-per-file sequence with a single call returning only the
+  matching lines; `listClasses` returns FQCNs, not jar entry paths
+- **The working copy is never touched** - reading another branch or tag of
+  a clone never requires a checkout, so sources of `3.27` can be read while
+  the working copy sits on `main` with uncommitted changes
+
+Repeated lookups are also cheap: the sources jar is located once per
+artifact and its FQCN listing and file contents are cached in memory
+(LRU, see `jasolo.maven.cache.*`), instead of re-reading the jar on every
+request like a stateless shell pipeline does.
 
 ## Tools
 
