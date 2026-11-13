@@ -267,3 +267,5 @@ the repo-root `jbang-catalog.json`) and native executables.
    - `target/jasolo-0.1.0-runner` renamed to
      `jasolo-0.1.0-<os>-<arch>` (e.g. `jasolo-0.1.0-linux-x86_64`) - one
      file per platform you built for
+6. Bump the version to the next development version
+   (`mvn versions:set -DnewVersion=0.2.0-SNAPSHOT`) and commit
