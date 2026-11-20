@@ -25,7 +25,12 @@ class MavenSourcesResolverTest {
     void setUp() throws IOException {
         base = Files.createTempDirectory("jasolo-m2-test");
         Fixtures.createM2(base);
-        resolver = new MavenSourcesResolver(TestConfigs.of(null, base.resolve("m2")));
+        resolver = newResolver(TestConfigs.of(null, base.resolve("m2")));
+    }
+
+    private MavenSourcesResolver newResolver(JasoloConfig config) {
+        // fetching disabled by default in TestConfigs.of()
+        return new MavenSourcesResolver(config, new MavenSourcesFetcher(config));
     }
 
     @AfterEach
@@ -63,6 +68,53 @@ class MavenSourcesResolverTest {
     }
 
     @Test
+    void locateMissingFetchesOnDemand() throws IOException {
+        // the sources jar of the missing artifact is "downloaded" by a fake
+        // Maven command - the resolver locates it on the next check
+        Path jar = base.resolve("fetched-sources.jar");
+        Fixtures.writeJar(jar, Map.of("org/example/missing/Missing.java",
+                "package org.example.missing;\npublic class Missing { /* fetched */ }\n"));
+        Path script = Fixtures.writeScript(base.resolve("fake-mvn"), """
+                #!/bin/sh
+                repo=""
+                for a in "$@"; do
+                  case "$a" in
+                    -Dmaven.repo.local=*) repo="${a#-Dmaven.repo.local=}";;
+                  esac
+                done
+                mkdir -p "$repo/org/example/missing/1.0.0"
+                cp %s "$repo/org/example/missing/1.0.0/missing-1.0.0-sources.jar"
+                """.formatted(jar));
+        var config = TestConfigs.of(null, base.resolve("m2"),
+                "show", 16, 256, List.of(), List.of(), true, List.of(script.toString()));
+        MavenSourcesResolver fetchResolver = newResolver(config);
+
+        Optional<LocatedSources> located = fetchResolver.locate(Gav.parse(Fixtures.MISSING_GAV));
+        assertTrue(located.isPresent());
+        assertTrue(located.get().origin().contains("missing-1.0.0-sources.jar"));
+        assertTrue(located.get().read("org.example.missing.Missing").orElseThrow().contains("fetched"));
+    }
+
+    @Test
+    void locateMissingFetchFails() throws IOException {
+        // Maven cannot find the sources jar - the resolver declines and the
+        // fetcher remembers the failure
+        Path script = Fixtures.writeScript(base.resolve("fake-mvn-fail"), """
+                #!/bin/sh
+                echo "[ERROR] Could not find artifact org.example:missing:jar:sources:1.0.0 in central" >&2
+                exit 1
+                """);
+        var config = TestConfigs.of(null, base.resolve("m2"),
+                "show", 16, 256, List.of(), List.of(), true, List.of(script.toString()));
+        MavenSourcesFetcher fetcher = new MavenSourcesFetcher(config);
+        MavenSourcesResolver fetchResolver = new MavenSourcesResolver(config, fetcher);
+
+        assertTrue(fetchResolver.locate(Gav.parse(Fixtures.MISSING_GAV)).isEmpty());
+        assertTrue(fetcher.failureFor(Gav.parse(Fixtures.MISSING_GAV)).orElseThrow()
+                .contains("no artifact with coordinates"));
+    }
+
+    @Test
     void validateLocalRepo() {
         // the fixture local repository exists - the construction in setUp()
         // already proves that the validation passes
@@ -70,7 +122,7 @@ class MavenSourcesResolverTest {
         // a configured path that does not exist fails the construction
         Path missingRepo = base.resolve("nonexistent-m2");
         IllegalStateException e = assertThrows(IllegalStateException.class,
-                () -> new MavenSourcesResolver(TestConfigs.of(null, missingRepo)));
+                () -> newResolver(TestConfigs.of(null, missingRepo)));
         assertTrue(e.getMessage().contains("Maven repository does not exist"));
     }
 
@@ -96,7 +148,7 @@ class MavenSourcesResolverTest {
 
     @Test
     void cacheDisabled() throws IOException {
-        resolver = new MavenSourcesResolver(TestConfigs.of(null, base.resolve("m2"), 0, 0));
+        resolver = newResolver(TestConfigs.of(null, base.resolve("m2"), 0, 0));
         LocatedSources sources = resolver.locate(Gav.parse(Fixtures.M2_ONLY_GAV)).orElseThrow();
         assertTrue(sources.read("org.example.libextra.Extra").orElseThrow().contains("class Extra {}"));
 
@@ -110,7 +162,7 @@ class MavenSourcesResolverTest {
     @Test
     void cacheExclusion() throws IOException {
         // the artifact is excluded from caching via configuration
-        resolver = new MavenSourcesResolver(TestConfigs.of(null, base.resolve("m2"),
+        resolver = newResolver(TestConfigs.of(null, base.resolve("m2"),
                 List.of(Fixtures.M2_ONLY_GA)));
 
         LocatedSources sources = resolver.locate(Gav.parse(Fixtures.M2_ONLY_GAV)).orElseThrow();
@@ -127,7 +179,7 @@ class MavenSourcesResolverTest {
 
     @Test
     void contentEviction() throws IOException {
-        resolver = new MavenSourcesResolver(TestConfigs.of(null, base.resolve("m2"), 16, 1));
+        resolver = newResolver(TestConfigs.of(null, base.resolve("m2"), 16, 1));
         LocatedSources sources = resolver.locate(Gav.parse(Fixtures.M2_ONLY_GAV)).orElseThrow();
         assertTrue(sources.read("org.example.libextra.Extra").orElseThrow().contains("class Extra {}"));
         // reading another class evicts the first one (max-files = 1)
@@ -148,7 +200,7 @@ class MavenSourcesResolverTest {
 
     @Test
     void jarEviction() {
-        resolver = new MavenSourcesResolver(TestConfigs.of(null, base.resolve("m2"), 1, 256));
+        resolver = newResolver(TestConfigs.of(null, base.resolve("m2"), 1, 256));
         Path libCoreJar = resolver.sourcesJar(Gav.parse(Fixtures.M2_FALLBACK_GAV));
         Path libExtraJar = resolver.sourcesJar(Gav.parse(Fixtures.M2_ONLY_GAV));
 

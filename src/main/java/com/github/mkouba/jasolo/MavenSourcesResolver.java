@@ -30,6 +30,10 @@ import io.quarkus.runtime.Startup;
  * Resolves the sources of a GAV from the {@code <artifactId>-<version>-sources.jar}
  * in the local Maven repository.
  * <p>
+ * When the jar is missing and fetching is enabled
+ * ({@code jasolo.maven.fetch.enabled}), it is downloaded on demand first -
+ * see {@link MavenSourcesFetcher}.
+ * <p>
  * Located jars are cached in a bounded LRU ({@code jasolo.maven.cache.max-jars});
  * an entry is dropped when the jar file changes on disk (modification time and
  * size are checked whenever a jar is located). Each cached jar also caches its
@@ -46,12 +50,14 @@ public class MavenSourcesResolver implements SourceResolver {
     private static final Logger LOG = Logger.getLogger(MavenSourcesResolver.class);
 
     private final Path localRepoPath;
+    private final MavenSourcesFetcher fetcher;
     // groupId:artifactId coordinates whose jars are never cached, see locate()
     private final Set<String> cacheExclusions;
     final JarCache cache;
 
-    MavenSourcesResolver(JasoloConfig config) {
+    MavenSourcesResolver(JasoloConfig config, MavenSourcesFetcher fetcher) {
         this.localRepoPath = Path.of(config.maven().localRepo());
+        this.fetcher = fetcher;
         this.cache = new JarCache(config.maven().cache().maxJars(), config.maven().cache().maxFiles());
         this.cacheExclusions = config.maven().cache().exclude().orElseGet(List::of).stream()
                 .filter(exclusion -> exclusion != null && !exclusion.isBlank())
@@ -73,8 +79,13 @@ public class MavenSourcesResolver implements SourceResolver {
     @Override
     public Optional<LocatedSources> locate(Gav gav) {
         Path jar = sourcesJar(gav);
-        if (jar == null || !Files.isRegularFile(jar)) {
-            return Optional.empty();
+        if (!Files.isRegularFile(jar)) {
+            // the sources jar is not in the local repository - fetch it on
+            // demand if enabled; the fetcher remembers failed attempts, so
+            // the resolver chain can explain them in the final error
+            if (!fetcher.enabled() || !fetcher.fetch(gav).fetched()) {
+                return Optional.empty();
+            }
         }
         if (cacheExclusions.contains(gav.ga())) {
             LOG.debugf("Jar excluded from caching: %s", jar);

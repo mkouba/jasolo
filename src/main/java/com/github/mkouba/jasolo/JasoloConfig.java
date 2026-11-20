@@ -61,9 +61,40 @@ public interface JasoloConfig {
         String localRepo();
 
         /**
+         * Fetching of missing sources jars on demand.
+         */
+        Fetch fetch();
+
+        /**
          * Caching of located sources jars.
          */
         Cache cache();
+
+        interface Fetch {
+
+            /**
+             * @return {@code true} if the {@code :sources} jar of an artifact
+             *         is downloaded on demand (via
+             *         {@code mvn dependency:get}) when no resolver can locate
+             *         the sources locally - the user's Maven settings
+             *         (mirrors, proxies, TLS trust) are honoured
+             */
+            @WithDefault("false")
+            boolean enabled();
+
+            /**
+             * @return the Maven command used for the on-demand fetch - the first
+             *         element is the executable, further elements are leading
+             *         arguments; jasolo appends
+             *         {@code -B -ntp dependency:get -Dartifact=g:a:v:jar:sources -Dtransitive=false -Dmaven.repo.local=<local-repo>}.
+             *         e.g. {@code mvn} (default), {@code mvnd} (faster
+             *         startup), a wrapper script or the absolute path of an
+             *         IDE-bundled Maven; configured as a comma-separated list,
+             *         e.g. {@code jasolo.maven.fetch.command=mvnd,--mode=daemon}
+             */
+            @WithDefault("mvn")
+            List<String> command();
+        }
 
         interface Cache {
 
