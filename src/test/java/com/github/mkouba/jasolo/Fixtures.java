@@ -197,6 +197,21 @@ final class Fixtures {
         Path dir = m2.resolve(groupId.replace('.', '/')).resolve(artifactId).resolve(version);
         Files.createDirectories(dir);
         Path jar = dir.resolve(artifactId + "-" + version + "-sources.jar");
+        writeJar(jar, entries);
+    }
+
+    /**
+     * Writes a bare binary jar (no sources classifier) of the artifact - used
+         * to simulate "artifact exists but no sources jar is published".
+     */
+    static void writeBinaryJar(Path m2, String groupId, String artifactId, String version) throws IOException {
+        Path dir = m2.resolve(groupId.replace('.', '/')).resolve(artifactId).resolve(version);
+        Files.createDirectories(dir);
+        writeJar(dir.resolve(artifactId + "-" + version + ".jar"), Map.of());
+    }
+
+    static void writeJar(Path jar, Map<String, String> entries) throws IOException {
+        Files.createDirectories(jar.getParent());
         try (JarOutputStream out = new JarOutputStream(Files.newOutputStream(jar))) {
             for (Map.Entry<String, String> entry : entries.entrySet()) {
                 out.putNextEntry(new ZipEntry(entry.getKey()));
@@ -204,6 +219,15 @@ final class Fixtures {
                 out.closeEntry();
             }
         }
+    }
+
+    /**
+     * Writes an executable shell script.
+     */
+    static Path writeScript(Path file, String content) throws IOException {
+        write(file, content);
+        Processes.exec(null, List.of("chmod", "+x", file.toString()));
+        return file;
     }
 
     private static void write(Path path, String content) throws IOException {

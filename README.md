@@ -6,7 +6,8 @@ built on the [Quarkus MCP server](https://github.com/quarkiverse/quarkus-mcp-ser
 Given a fully qualified class name (FQCN) and Maven coordinates (GAV), jasolo
 finds the source file - preferring your **local git clones** (including
 branch/tag switching for specific versions) and falling back to the
-**sources jars in your local Maven repository**.
+**sources jars in your local Maven repository**, optionally **fetching a
+missing sources jar on demand**.
 
 jasolo is for **sources of dependency artifacts**. It is not intended for
 reading files of the project you are currently working on - use your
@@ -135,8 +136,57 @@ An exact match of a later resolver wins then (e.g. the sources jar of exactly
 that version); the approximate match is used only if no resolver can locate
 the GAV exactly, and the tool result carries a warning.
 
-If no resolver can locate the GAV, the tool returns an error explaining what
-was tried.
+If no resolver can locate the GAV and fetching is enabled (see below), the
+`m2-sources-jar` resolver downloads the `:sources` jar on demand and serves
+it in the same pass. If the GAV still cannot be located, the tool returns an
+error explaining what was tried.
+
+### Fetching sources jars on demand
+
+Third-party dependencies are often present in the local Maven repository
+only as binary jars - no `-sources.jar`. With
+`jasolo.maven.fetch.enabled=true` (off by default), jasolo downloads the
+missing sources jar on demand when no resolver can locate the sources of a
+GAV exactly. The executed command is built as
+
+```
+<jasolo.maven.fetch.command...> -B -ntp dependency:get \
+  -Dartifact=<groupId>:<artifactId>:<version>:jar:sources \
+  -Dtransitive=false -Dmaven.repo.local=<jasolo.maven.local-repo>
+```
+
+i.e. the configured Maven command (a comma-separated list - the first
+element is the executable, further elements are leading arguments, e.g.
+`jasolo.maven.fetch.command=mvnd,--mode=daemon`), followed by the fixed
+`dependency:get` arguments shown above. `-Dmaven.repo.local` makes the
+download land in exactly the repository jasolo reads from.
+
+The download is done by the configured Maven command
+(`jasolo.maven.fetch.command`, default `mvn`), so the user's Maven settings
+- mirrors, proxies, TLS trust - are honoured. `mvnd` (faster startup), a
+wrapper script or the absolute path of an IDE-bundled Maven work too - see
+the command template above. A fetched jar is then served
+like any other m2 sources jar. Failed fetches are remembered per GAV, so
+repeated tool calls do not re-run Maven.
+
+When fetching is disabled or fails, the error is actionable:
+
+- it carries the exact `mvn dependency:get` command to run manually (and
+  how to enable the on-demand fetch), and
+- a failed fetch distinguishes *the artifact exists in the local repository
+  but no sources jar is published for it* (falling back to a decompiler may
+  be the only option) from *the coordinates were not found in the remote
+  repositories at all*.
+
+If the configured command cannot be executed at all (e.g. `mvn` is not on
+the `PATH` of the jasolo process - MCP clients often do not launch it from
+a shell), the error says so and suggests installing Maven or pointing
+`jasolo.maven.fetch.command` at the absolute path of a Maven executable
+(`mvn`, `mvnd` and IDE-bundled Maven all work).
+
+An exact match fetched this way is preferred over an approximate git match;
+if the fetch fails, the approximate match (e.g. a maintenance branch) is
+still used and a warning is logged.
 
 The configuration is validated at startup, so a misconfigured application
 fails fast instead of failing on the first tool call:
@@ -186,6 +236,8 @@ and branches are picked up without restarting the server.
 | `jasolo.git.access-mode` | `show` | Git access strategy. `show` reads files from a ref without touching the working copy. The `GitAccessStrategy` SPI allows other modes (e.g. real checkouts). |
 | `jasolo.git.ref-patterns` | `{version},v{version},{major}.{minor},{major}.{minor}.x,development/{major}.{minor}` | Ordered ref patterns; placeholders `{version}`, `{major}`, `{minor}`. |
 | `jasolo.maven.local-repo` | `~/.m2/repository` | Local Maven repository path. |
+| `jasolo.maven.fetch.enabled` | `false` | Download the `:sources` jar of an artifact on demand (`mvn dependency:get`) when no resolver can locate the sources locally. Honours the user's Maven settings (mirrors, proxies, TLS trust). |
+| `jasolo.maven.fetch.command` | `mvn` | The Maven command used for the on-demand fetch, as a comma-separated list: the first element is the executable, further elements are leading arguments (e.g. `mvnd,--mode=daemon`). `mvnd` (faster startup), a wrapper script or the absolute path of an IDE-bundled Maven work too - jasolo appends the fixed `dependency:get` arguments, see [Fetching sources jars on demand](#fetching-sources-jars-on-demand). |
 | `jasolo.maven.cache.max-jars` | `16` | Located sources jars kept in an LRU cache; a jar is re-read when it changes on disk (timestamp/size). `0` disables caching. |
 | `jasolo.maven.cache.max-files` | `256` | Source file contents cached per located jar (LRU). `0` disables content caching (the FQCN listing is still cached). |
 | `jasolo.maven.cache.exclude` | *(empty)* | `groupId:artifactId` coordinates whose sources jars are never cached, e.g. known large jars - every read of an excluded artifact goes to disk. |

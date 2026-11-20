@@ -39,6 +39,11 @@ final class TestConfigs {
 
     static JasoloConfig of(Path gitRoot, Path m2Repo, String accessMode, int maxJars, int maxFiles,
             List<String> cacheExclusions, List<String> gitExclusions) {
+        return of(gitRoot, m2Repo, accessMode, maxJars, maxFiles, cacheExclusions, gitExclusions, false, List.of("mvn"));
+    }
+
+    static JasoloConfig of(Path gitRoot, Path m2Repo, String accessMode, int maxJars, int maxFiles,
+            List<String> cacheExclusions, List<String> gitExclusions, boolean fetchEnabled, List<String> fetchCommand) {
         List<String> roots = gitRoot == null ? List.of() : List.of(gitRoot.toString());
         String localRepo = m2Repo == null ? "/nonexistent-m2" : m2Repo.toString();
         return new JasoloConfig() {
@@ -77,6 +82,22 @@ final class TestConfigs {
                     @Override
                     public String localRepo() {
                         return localRepo;
+                    }
+
+                    @Override
+                    public Fetch fetch() {
+                        return new Fetch() {
+
+                            @Override
+                            public boolean enabled() {
+                                return fetchEnabled;
+                            }
+
+                            @Override
+                            public List<String> command() {
+                                return fetchCommand;
+                            }
+                        };
                     }
 
                     @Override

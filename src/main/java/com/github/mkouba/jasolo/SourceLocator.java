@@ -14,6 +14,10 @@ import jakarta.inject.Singleton;
  * e.g. a release version read from a git maintenance branch, is only used
  * if no later resolver can locate the GAV exactly; if no resolver can locate
  * the GAV at all, a {@link SourceNotFoundException} is thrown.
+ * <p>
+ * A resolver may fetch missing sources on demand itself (see
+ * {@link MavenSourcesFetcher}); the locator only surfaces the remembered
+ * failure of such an attempt in the final error.
  */
 @Singleton
 public class SourceLocator {
@@ -21,9 +25,11 @@ public class SourceLocator {
     private static final Logger LOG = Logger.getLogger(SourceLocator.class);
 
     private final List<SourceResolver> resolvers;
+    private final MavenSourcesFetcher fetcher;
 
-    SourceLocator(@All List<SourceResolver> resolvers) {
+    SourceLocator(@All List<SourceResolver> resolvers, MavenSourcesFetcher fetcher) {
         this.resolvers = resolvers;
+        this.fetcher = fetcher;
     }
 
     /**
@@ -60,7 +66,14 @@ public class SourceLocator {
             return approximate;
         }
         LOG.debugf("No resolver could locate %s, tried: %s", gav, tried);
-        throw new SourceNotFoundException(gav, tried);
+        // a resolver may have attempted an on-demand fetch of the sources jar
+        // (see MavenSourcesResolver) - its failure is remembered per GAV and
+        // makes the error actionable
+        throw new SourceNotFoundException(gav, tried, fetchFailure(gav));
+    }
+
+    private String fetchFailure(Gav gav) {
+        return fetcher.failureFor(gav).orElse(null);
     }
 
     List<String> resolverNames() {
